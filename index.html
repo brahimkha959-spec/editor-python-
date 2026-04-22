@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="author" content="brahim-khalef"/>
+  <meta name="designer" content="brahim-khalef" />
+  <meta name="publishe" content="brahim-khalef"/>
+  <meta name="assistant" content="brahim-khalef"/>
+  <title>🐍 محرر بايثون المتقدم</title>
+  <!-- CodeMirror 5 -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+  
+  <!-- Pyodide (محرك بايثون داخل المتصفح) -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js"></script>
+  
+  <style>
+    * { box-sizing: border-box; }
+    body { background: #0a0a0a; color: #e0e0e0; margin: 0; font-family: 'Segoe UI', Tahoma, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    
+    .toolbar { background: #151515; padding: 10px; display: flex; gap: 8px; border-bottom: 1px solid #333; flex-wrap: wrap; align-items: center; }
+    button { background: #2d2d2d; color: #fff; border: 1px solid #444; padding: 8px 14px; border-radius: 5px; cursor: pointer; font-size: 14px; transition: 0.2s; }
+    button:hover { background: #444; }
+    button.run { background: #27ae60; border-color: #2ecc71; }
+    button.pip { background: #2980b9; border-color: #3498db; }
+    button.file { background: #8e44ad; border-color: #9b59b6; }
+    
+    #editor-container { flex: 1; position: relative; overflow: hidden; }
+    .CodeMirror { height: 100% !important; background: #0d0d0d !important; color: #ffffff !important; font-family: 'Consolas', 'Courier New', monospace !important; font-size: 14px !important; line-height: 1.5 !important; }
+    .CodeMirror-gutters { background: #0a0a0a !important; border-right: 1px solid #333 !important; }
+    .CodeMirror-linenumber { color: #555 !important; padding: 0 8px !important; }
+    .CodeMirror-cursor { border-left: 2px solid #00aaff !important; }
+    .CodeMirror-selected { background: #1a1a3a !important; }
+    .CodeMirror-activeline-background { background: #111118 !important; }
+    
+    /* ألوان التلوين المطلوبة */
+    .cm-keyword { color: #4da6ff !important; font-weight: bold; }   /* أزرق */
+    .cm-string { color: #ff5555 !important; }                     /* أحمر */
+    .cm-comment { color: #666666 !important; font-style: italic; }/* رمادي */
+    .cm-number { color: #ffcc00 !important; }                     /* أصفر */
+    .cm-builtin { color: #00e676 !important; }                    /* أخضر */
+    .cm-operator { color: #ffffff !important; }
+    .cm-def { color: #00aaff !important; }
+    
+    #console { background: #111; color: #aaa; padding: 10px; height: 160px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 13px; border-top: 1px solid #333; white-space: pre-wrap; }
+    .log-ok { color: #2ecc71; }
+    .log-err { color: #e74c3c; }
+    .log-warn { color: #f39c12; }
+    
+    #loader { position: fixed; inset: 0; background: #0a0a0a; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 999; transition: opacity 0.3s; }
+    .spinner { width: 40px; height: 40px; border: 4px solid #333; border-top: 4px solid #2980b9; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 15px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    input[type="file"] { display: none; }
+  </style>
+</head>
+<body>
+
+  <div id="loader">
+    <div class="spinner"></div>
+    <div>جاري تحميل محرك بايثون... ⏳</div>
+  </div>
+
+  <div class="toolbar">
+    <label class="button file" for="fileInput">📂 فتح ملف</label>
+    <input type="file" id="fileInput" accept=".py,.txt,.json">
+    <button class="file" onclick="downloadCode()">💾 حفظ كـ .py</button>
+    <button class="run" onclick="runCode()">▶️ تشغيل</button>
+    <button class="pip" onclick="installPackage()">📦 تثبيت pip</button>
+    <button onclick="clearConsole()">🧹 مسح الإخراج</button>
+  </div>
+
+  <div id="editor-container">
+    <textarea id="code"># 🐍 
+    import math 
+  x=5
+  y=10
+
+print(x+y)
+print(x*y)
+print(x-y)
+</textarea>
+  </div>
+
+  <div id="console">جاهز للتنفيذ...</div>
+
+<script>
+  let pyodide = null;
+  const editor = CodeMirror.fromTextArea(document.getElementById("code"), {
+    mode: "python",
+    lineNumbers: true,
+    styleActiveLine: true,
+    autoCloseBrackets: true,
+    indentUnit: 4,
+    tabSize: 4,
+    indentWithTabs: false,
+    lineWrapping: true
+  });
+
+  function log(msg, type = "") {
+    const consoleDiv = document.getElementById("console");
+    const div = document.createElement("div");
+    div.className = type;
+    div.textContent = msg;
+    consoleDiv.appendChild(div);
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+  }
+
+  async function initPyodide() {
+    try {
+      pyodide = await loadPyodide();
+      
+      // توجيه المخرجات والأخطاء إلى الكونسول
+      pyodide.setStdout({ batched: (msg) => log(msg) });
+      pyodide.setStderr({ batched: (msg) => log(msg, "log-err") });
+      
+      document.getElementById("loader").style.opacity = "0";
+      setTimeout(() => document.getElementById("loader").style.display = "none", 300);
+      log("✅ تم تحميل محرك بايثون (CPython WebAssembly) بنجاح!", "log-ok");
+      log("💡 يمكنك تشغيل أي كود بايثون قياسي أو تثبيت حزم عبر زر pip", "");
+    } catch (e) {
+      document.getElementById("loader").innerHTML = `<div style="color:#e74c3c">❌ فشل التحميل:<br>${e.message}</div>`;
+    }
+  }
+
+  async function runCode() {
+    if (!pyodide) return log("⏳ المحرك لم يكتمل تحميله بعد", "log-warn");
+    const code = editor.getValue();
+    log("🔄 جاري التنفيذ...", "");
+    
+    try {
+      await pyodide.runPythonAsync(code);
+      log("✅ اكتمل التنفيذ بنجاح", "log-ok");
+    } catch (err) {
+      log("❌ خطأ: " + err.message, "log-err");
+    }
+  }
+
+  async function installPackage() {
+    if (!pyodide) return log("⏳ المحرك غير جاهز", "log-warn");
+    const pkg = prompt("أدخل اسم الحزمة (مثال: numpy, pandas, requests, matplotlib):");
+    if (!pkg?.trim()) return;
+    
+    log(`📦 جاري تثبيت "${pkg.trim()}" عبر micropip...`);
+    try {
+      await pyodide.runPythonAsync(`
+        import micropip
+        await micropip.install('${pkg.trim()}')
+      `);
+      log(`✅ تم تثبيت "${pkg.trim()}" بنجاح! يمكنك استخدام import الآن.`, "log-ok");
+    } catch (err) {
+      log(`❌ فشل التثبيت: ${err.message}`, "log-err");
+      log("💡 ملاحظة: بعض الحزم ذات الامتدادات C غير مدعومة بعد في Pyodide.", "");
+    }
+  }
+
+  // فتح ملف محلي
+  document.getElementById("fileInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      editor.setValue(reader.result);
+      log(`📂 تم فتح: ${file.name}`, "log-ok");
+    };
+    reader.readAsText(file);
+  });
+
+  // حفظ كود كملف .py
+  function downloadCode() {
+    const blob = new Blob([editor.getValue()], { type: "text/x-python" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "script.py";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    log("💾 تم حفظ الملف كـ script.py", "log-ok");
+  }
+
+  function clearConsole() { document.getElementById("console").innerHTML = ""; }
+
+  // بدء التحميل
+  initPyodide();
+</script>
+</body>
+</html>
